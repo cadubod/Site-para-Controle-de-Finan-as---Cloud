@@ -1,0 +1,76 @@
+# ============================================================
+# Credenciais e secrets — NUNCA commitar
+# ============================================================
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Empacotamento / instalação
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ============================================================
+# Streamlit
+# ============================================================
+.streamlit/secrets.toml
+.streamlit/*.log
+
+# ============================================================
+# Testes / cobertura / cache de ferramentas
+# ============================================================
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ============================================================
+# Jupyter (caso use notebooks para explorar dados)
+# ============================================================
+.ipynb_checkpoints/
+
+# ============================================================
+# IDEs / Editores
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ============================================================
+# Supabase CLI (se usar localmente)
+# ============================================================
+.supabase/
+supabase/.temp/
+
+# ============================================================
+# Logs e arquivos temporários
+# ============================================================
+*.log
+*.tmp
+.cache/
