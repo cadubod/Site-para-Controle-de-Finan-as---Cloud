@@ -21,11 +21,47 @@ def _get_secret(key: str, default: str = "") -> str:
         return default
 
 
-SUPABASE_URL: str = _get_secret("url", "https://aqcptekeoyjadchwtfwh.supabase.co/rest/v1/")
-SUPABASE_ANON_KEY: str = _get_secret("anon_key", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxY3B0ZWtlb3lqYWRjaHd0ZndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NTU3NTcsImV4cCI6MjEwNTMzMTc1N30.wAwBSZrNLes91d5w4VFkJRpfVebovKPQkcKYilgd1E8")
+SUPABASE_URL: str = _get_secret("url", "https://SEU_PROJETO.supabase.co")
+SUPABASE_ANON_KEY: str = _get_secret("anon_key", "SUA_ANON_KEY_AQUI")
 
-_PLACEHOLDER_URL = "https://aqcptekeoyjadchwtfwh.supabase.co/rest/v1/"
-_PLACEHOLDER_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxY3B0ZWtlb3lqYWRjaHd0ZndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NTU3NTcsImV4cCI6MjEwNTMzMTc1N30.wAwBSZrNLes91d5w4VFkJRpfVebovKPQkcKYilgd1E8"
+_PLACEHOLDER_URL = "https://SEU_PROJETO.supabase.co"
+_PLACEHOLDER_KEY = "SUA_ANON_KEY_AQUI"
+
+
+def _diagnostico_secrets() -> str:
+    """Monta uma explicação do que foi (ou não) encontrado em st.secrets,
+    sem expor os valores reais das credenciais."""
+    try:
+        chaves_raiz = list(st.secrets.keys())
+    except Exception:
+        return "Não consegui acessar `st.secrets` de forma alguma — o arquivo `secrets.toml` provavelmente não existe ou não está no caminho certo."
+
+    if not chaves_raiz:
+        return "`st.secrets` está vazio — nenhuma seção foi encontrada."
+
+    if "supabase" not in st.secrets:
+        return (
+            f"Encontrei secrets, mas **sem a seção `[supabase]`**. "
+            f"Seções encontradas: `{chaves_raiz}`. Confira se o cabeçalho `[supabase]` "
+            f"está escrito exatamente assim (minúsculo, com colchetes) e se `url`/`anon_key` "
+            f"estão *dentro* dela, não soltas no topo do arquivo."
+        )
+
+    chaves_supabase = list(st.secrets["supabase"].keys())
+    faltando = [k for k in ("url", "anon_key") if k not in chaves_supabase]
+    if faltando:
+        return (
+            f"A seção `[supabase]` existe, mas está faltando: `{faltando}`. "
+            f"Chaves encontradas dentro dela: `{chaves_supabase}`. "
+            f"Confira se os nomes são exatamente `url` e `anon_key` (minúsculo)."
+        )
+
+    return (
+        "A seção `[supabase]` existe com `url` e `anon_key` preenchidos, mas o valor "
+        "lido ainda é o placeholder — confira se não sobrou algum espaço, aspas erradas, "
+        "ou se você editou um `secrets.toml` diferente do que o app está lendo "
+        "(local vs. Streamlit Cloud são arquivos separados)."
+    )
 
 
 def _validar_credenciais():
@@ -39,7 +75,8 @@ def _validar_credenciais():
             "```toml\n[supabase]\n"
             "url = \"https://SEU-ID-REAL.supabase.co\"\n"
             "anon_key = \"sua-anon-key-aqui\"\n```\n\n"
-            "Esses valores ficam em **Project Settings → API** no painel do Supabase."
+            "Esses valores ficam em **Project Settings → API** no painel do Supabase.\n\n"
+            f"🔎 **Diagnóstico:** {_diagnostico_secrets()}"
         )
         st.stop()
 
