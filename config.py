@@ -24,8 +24,8 @@ def _get_secret(key: str, default: str = "") -> str:
 SUPABASE_URL: str = _get_secret("url", "https://aqcptekeoyjadchwtfwh.supabase.co").strip().rstrip("/")
 SUPABASE_ANON_KEY: str = _get_secret("anon_key", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxY3B0ZWtlb3lqYWRjaHd0ZndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NTU3NTcsImV4cCI6MjEwNTMzMTc1N30.wAwBSZrNLes91d5w4VFkJRpfVebovKPQkcKYilgd1E8").strip()
 
-_PLACEHOLDER_URL = "https://SEU_PROJETO.supabase.co"
-_PLACEHOLDER_KEY = "SUA_ANON_KEY_AQUI"
+_PLACEHOLDER_URL = "https://aqcptekeoyjadchwtfwh.supabase.co"
+_PLACEHOLDER_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxY3B0ZWtlb3lqYWRjaHd0ZndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NTU3NTcsImV4cCI6MjEwNTMzMTc1N30.wAwBSZrNLes91d5w4VFkJRpfVebovKPQkcKYilgd1E8"
 
 
 def _diagnostico_secrets() -> str:
