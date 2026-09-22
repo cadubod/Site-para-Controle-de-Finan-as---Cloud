@@ -21,11 +21,11 @@ def _get_secret(key: str, default: str = "") -> str:
         return default
 
 
-SUPABASE_URL: str = _get_secret("url", "https://aqcptekeoyjadchwtfwh.supabase.co")
-SUPABASE_ANON_KEY: str = _get_secret("anon_key", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxY3B0ZWtlb3lqYWRjaHd0ZndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NTU3NTcsImV4cCI6MjEwNTMzMTc1N30.wAwBSZrNLes91d5w4VFkJRpfVebovKPQkcKYilgd1E8")
+SUPABASE_URL: str = _get_secret("url", "https://SEU_PROJETO.supabase.co")
+SUPABASE_ANON_KEY: str = _get_secret("anon_key", "SUA_ANON_KEY_AQUI")
 
-_PLACEHOLDER_URL = "https://aqcptekeoyjadchwtfwh.supabase.co"
-_PLACEHOLDER_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxY3B0ZWtlb3lqYWRjaHd0ZndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NTU3NTcsImV4cCI6MjEwNTMzMTc1N30.wAwBSZrNLes91d5w4VFkJRpfVebovKPQkcKYilgd1E8"
+_PLACEHOLDER_URL = "https://SEU_PROJETO.supabase.co"
+_PLACEHOLDER_KEY = "SUA_ANON_KEY_AQUI"
 
 
 def _diagnostico_secrets() -> str:
@@ -56,11 +56,18 @@ def _diagnostico_secrets() -> str:
             f"Confira se os nomes são exatamente `url` e `anon_key` (minúsculo)."
         )
 
+    url_lido = st.secrets["supabase"].get("url", "")
+    key_lido = st.secrets["supabase"].get("anon_key", "")
+    url_preview = url_lido if len(url_lido) < 45 else url_lido[:42] + "..."
+    key_preview = (key_lido[:6] + "…" + key_lido[-4:]) if len(key_lido) > 12 else key_lido
+
     return (
-        "A seção `[supabase]` existe com `url` e `anon_key` preenchidos, mas o valor "
-        "lido ainda é o placeholder — confira se não sobrou algum espaço, aspas erradas, "
-        "ou se você editou um `secrets.toml` diferente do que o app está lendo "
-        "(local vs. Streamlit Cloud são arquivos separados)."
+        f"A seção `[supabase]` existe com `url` e `anon_key` preenchidos, mas o valor lido "
+        f"ainda bate com o texto de exemplo do código. **Valor atual de `url`:** `{url_preview}` "
+        f"— **`anon_key`:** `{key_preview}` (tamanho: {len(key_lido)} caracteres). "
+        f"Se isso ainda mostra `SEU_PROJETO`/`SEU-ID-REAL` ou `SUA_ANON_KEY_AQUI`/`sua-anon-key-aqui`, "
+        f"você esqueceu de trocar pelos valores reais do seu projeto (Project Settings → API no Supabase). "
+        f"Uma anon_key real costuma ter mais de 100 caracteres e começar com `eyJ`."
     )
 
 
