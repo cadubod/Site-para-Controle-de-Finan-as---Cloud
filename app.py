@@ -13,6 +13,7 @@ from config import (
     get_supabase_client, CATEGORIAS, TIPOS_GASTO, TIPOS_RENDA,
     NATUREZAS, DESTINOS, CHART_PALETTE, COLORS,
     MEMBER_COLORS, MEMBER_EMOJIS,
+    METODOS_PAGAMENTO, CATEGORIAS_INVESTIMENTO,
     APP_TITLE, APP_ICON, APP_LAYOUT,
 )
 from styles import inject_css
@@ -95,12 +96,34 @@ def carregar_membros(_user_id: str) -> list[dict]:
     return get_members()
 
 
+@st.cache_data(ttl=30)
+def carregar_bancos(_user_id: str) -> pd.DataFrame:
+    """Cartões / contas cadastrados (com limite, fechamento e vencimento)."""
+    try:
+        res = supabase.table("contas_bancos").select("*").order("nome_banco").execute()
+        return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=30)
+def carregar_investimentos(_user_id: str) -> pd.DataFrame:
+    """Posições reais da carteira de investimentos/caixinhas."""
+    try:
+        res = supabase.table("investimentos").select("*").order("id").execute()
+        return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
 def invalidar_cache():
     """Limpa caches de dados para recarregar."""
     carregar_gastos.clear()
     carregar_rendas.clear()
     carregar_metas.clear()
     carregar_membros.clear()
+    carregar_bancos.clear()
+    carregar_investimentos.clear()
 
 
 # ──────────────────────────────────────────────
@@ -135,6 +158,36 @@ with col_user:
         logout()
 
 st.markdown("---")
+
+# ──────────────────────────────────────────────
+# VISÃO: Geral / Pessoal / Conta Conjunta
+# ──────────────────────────────────────────────
+# Só faz sentido oferecer o filtro se o usuário participa de uma conta
+# conjunta — do contrário, "Geral" e "Pessoal" seriam idênticos.
+ja_info_visao = get_joint_account_info()
+visao_atual = "Geral"
+if ja_info_visao:
+    visao_atual = st.radio(
+        "👁️ Visão",
+        options=["Geral", "Só o Meu", "Só Conta Conjunta"],
+        horizontal=True,
+        help="Filtra o painel inteiro: tudo, só o que é seu e privado, ou só o que é compartilhado na conta conjunta.",
+    )
+    st.markdown("---")
+
+
+def aplicar_visao(df: pd.DataFrame) -> pd.DataFrame:
+    """Filtra um DataFrame (com colunas profile_id/shared) pela Visão selecionada."""
+    if df.empty or "profile_id" not in df.columns:
+        return df
+    if visao_atual == "Só o Meu":
+        return df[df["profile_id"] == user_id]
+    if visao_atual == "Só Conta Conjunta":
+        if "shared" in df.columns:
+            return df[df["shared"] == True]  # noqa: E712
+        return df[df["profile_id"] != user_id]
+    return df
+
 
 # ──────────────────────────────────────────────
 # PERFIS-MEMBRO: mapas auxiliares (nome/emoji/cor)
@@ -210,6 +263,14 @@ with col_f4:
 df_gastos = carregar_gastos(user_id, mes_filtro)
 df_rendas = carregar_rendas(user_id)
 df_metas = carregar_metas(user_id)
+df_bancos = carregar_bancos(user_id)
+df_investimentos = carregar_investimentos(user_id)
+
+# Aplicar a Visão selecionada (Geral / Só o Meu / Só Conta Conjunta)
+df_gastos = aplicar_visao(df_gastos)
+df_rendas = aplicar_visao(df_rendas)
+df_bancos = aplicar_visao(df_bancos)
+df_investimentos = aplicar_visao(df_investimentos)
 
 # Aplicar filtros adicionais
 if not df_gastos.empty and filtro_categoria:
@@ -222,66 +283,133 @@ if not df_gastos.empty:
         df_gastos = df_gastos[df_gastos["comprador"].isin(filtro_comprador)]
 
 # ──────────────────────────────────────────────
+# CARTÕES / CONTAS: mapa auxiliar
+# ──────────────────────────────────────────────
+lista_bancos = df_bancos.to_dict("records") if not df_bancos.empty else []
+banco_por_id = {b["id"]: b for b in lista_bancos}
+opcoes_banco_form = [b["nome_banco"] for b in lista_bancos]
+
+# ──────────────────────────────────────────────
 # SIDEBAR: LANÇAMENTOS
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.header("⚡ Lançamentos")
 
-    # --- Novo Gasto ---
-    with st.expander("➕ Novo Gasto", expanded=True):
-        with st.form("form_gasto", clear_on_submit=True):
-            desc = st.text_input("Descrição", placeholder="Ex: Almoço, Parcela Carro")
-            valor = st.number_input("Valor (R$)", min_value=0.01, step=5.0, format="%.2f")
-            tipo = st.selectbox("Forma / Tipo", TIPOS_GASTO)
+    # --- Gasto Avulso (Débito / Pix / Dinheiro) ---
+    with st.expander("☕ Gasto Avulso (Débito/Pix)", expanded=True):
+        with st.form("form_gasto_avulso", clear_on_submit=True):
+            desc_av = st.text_input("Descrição", placeholder="Ex: Almoço, Uber", key="desc_av")
+            valor_av = st.number_input("Valor (R$)", min_value=0.01, step=5.0, format="%.2f", key="valor_av")
+            metodo_av = st.selectbox("Método", [m for m in METODOS_PAGAMENTO if m != "Crédito"], key="metodo_av")
 
-            c_p1, c_p2 = st.columns(2)
-            with c_p1:
-                p_atual = st.number_input("Parcela", min_value=1, value=1, step=1)
-            with c_p2:
-                p_total = st.number_input("Total Parc.", min_value=1, value=1, step=1)
+            categoria_av = st.selectbox("Categoria", CATEGORIAS, key="cat_av")
+            natureza_av = st.selectbox("Natureza", NATUREZAS, key="nat_av")
+            destino_av = st.selectbox("Destino", DESTINOS, key="dest_av")
 
-            categoria = st.selectbox("Categoria", CATEGORIAS)
-            natureza = st.selectbox("Natureza", NATUREZAS)
-            destino = st.selectbox("Destino", DESTINOS)
-
-            quem_comprou = st.selectbox(
-                "🙋 Quem fez esta compra?",
-                options=opcoes_comprador_form,
-                help="Útil para cartão compartilhado: marque quem realmente fez a compra, "
-                     "mesmo lançando tudo pela sua conta.",
+            quem_comprou_av = st.selectbox(
+                "🙋 Quem fez esta compra?", options=opcoes_comprador_form, key="quem_av",
             )
 
-            c_d1, c_d2 = st.columns(2)
-            with c_d1:
-                data_gasto = st.date_input("Data", value=date.today())
-            with c_d2:
-                is_shared = st.checkbox("Gasto compartilhado", value=False,
-                                        help="Marque para que outros membros da conta conjunta vejam este gasto")
+            c_av1, c_av2 = st.columns(2)
+            with c_av1:
+                data_av = st.date_input("Data", value=date.today(), key="data_av")
+            with c_av2:
+                shared_av = st.checkbox("Compartilhado", value=False, key="shared_av",
+                                        help="Visível para a conta conjunta")
 
-            btn_gasto = st.form_submit_button("💾 Salvar Despesa", use_container_width=True)
-            if btn_gasto and desc.strip():
-                parcelas_txt = f"{int(p_atual)}/{int(p_total)}" if p_total > 1 else "À vista"
-                # Resolve o membro selecionado (None = o próprio dono do login)
-                idx_comprador = opcoes_comprador_form.index(quem_comprou)
-                membro_id_selecionado = (
-                    lista_membros[idx_comprador - 1]["id"] if idx_comprador > 0 else None
-                )
+            if st.form_submit_button("💾 Salvar Gasto Avulso", use_container_width=True) and desc_av.strip():
+                idx_c = opcoes_comprador_form.index(quem_comprou_av)
+                membro_sel = lista_membros[idx_c - 1]["id"] if idx_c > 0 else None
                 supabase.table("gastos").insert({
                     "profile_id": user_id,
-                    "membro_id": membro_id_selecionado,
-                    "descricao": desc.strip(),
-                    "valor": float(valor),
-                    "tipo": tipo,
-                    "natureza": natureza,
-                    "destino": destino,
-                    "categoria": categoria,
-                    "parcelas": parcelas_txt,
-                    "shared": is_shared,
-                    "data_registro": str(data_gasto),
+                    "membro_id": membro_sel,
+                    "descricao": desc_av.strip(),
+                    "valor": float(valor_av),
+                    "valor_total": float(valor_av),
+                    "tipo": "Momentâneo (À vista)",
+                    "natureza": natureza_av,
+                    "destino": destino_av,
+                    "categoria": categoria_av,
+                    "parcelas": "À vista",
+                    "parcelas_pagas": 1,
+                    "parcelas_totais": 1,
+                    "metodo_pagamento": metodo_av,
+                    "is_recorrente": False,
+                    "shared": shared_av,
+                    "data_registro": str(data_av),
                 }).execute()
                 st.success("✅ Gasto registrado!")
                 invalidar_cache()
                 st.rerun()
+
+    # --- Compra no Cartão (Crédito, com parcelamento real) ---
+    with st.expander("💳 Compra no Cartão (Crédito)"):
+        if not lista_bancos:
+            st.info("Cadastre um cartão em '🏦 Cartões & Contas' antes de lançar uma compra no crédito.")
+        else:
+            with st.form("form_gasto_cartao", clear_on_submit=True):
+                desc_cc = st.text_input("Descrição", placeholder="Ex: Notebook, Celular", key="desc_cc")
+                valor_cc = st.number_input("Valor da Parcela (R$)", min_value=0.01, step=5.0,
+                                           format="%.2f", key="valor_cc",
+                                           help="Valor que aparece na fatura todo mês")
+                banco_cc = st.selectbox("Cartão", options=opcoes_banco_form, key="banco_cc")
+
+                recorrente_cc = st.checkbox("🔁 Assinatura recorrente (sem data para acabar)", key="rec_cc")
+                if not recorrente_cc:
+                    c_pc1, c_pc2 = st.columns(2)
+                    with c_pc1:
+                        p_pagas_cc = st.number_input("Parcela Atual", min_value=1, value=1, step=1, key="p_pagas_cc")
+                    with c_pc2:
+                        p_total_cc = st.number_input("Total de Parcelas", min_value=1, value=1, step=1, key="p_total_cc")
+                else:
+                    p_pagas_cc, p_total_cc = 1, 1
+
+                categoria_cc = st.selectbox("Categoria", CATEGORIAS, key="cat_cc")
+                natureza_cc = st.selectbox("Natureza", NATUREZAS, key="nat_cc")
+                destino_cc = st.selectbox("Destino", DESTINOS, key="dest_cc")
+
+                quem_comprou_cc = st.selectbox(
+                    "🙋 Quem fez esta compra?", options=opcoes_comprador_form, key="quem_cc",
+                )
+
+                c_cc1, c_cc2 = st.columns(2)
+                with c_cc1:
+                    data_cc = st.date_input("Data da Compra", value=date.today(), key="data_cc")
+                with c_cc2:
+                    shared_cc = st.checkbox("Compartilhado", value=False, key="shared_cc",
+                                            help="Visível para a conta conjunta")
+
+                if st.form_submit_button("💾 Salvar Compra", use_container_width=True) and desc_cc.strip():
+                    banco_id_sel = next(
+                        (b["id"] for b in lista_bancos if b["nome_banco"] == banco_cc), None
+                    )
+                    idx_c2 = opcoes_comprador_form.index(quem_comprou_cc)
+                    membro_sel2 = lista_membros[idx_c2 - 1]["id"] if idx_c2 > 0 else None
+                    parcelas_txt = "Assinatura" if recorrente_cc else (
+                        f"{int(p_pagas_cc)}/{int(p_total_cc)}" if p_total_cc > 1 else "À vista"
+                    )
+                    supabase.table("gastos").insert({
+                        "profile_id": user_id,
+                        "membro_id": membro_sel2,
+                        "banco_id": banco_id_sel,
+                        "descricao": desc_cc.strip(),
+                        "valor": float(valor_cc),
+                        "valor_total": float(valor_cc) * (1 if recorrente_cc else int(p_total_cc)),
+                        "tipo": "Fixo Recorrente" if recorrente_cc else "Parcelado Cartão",
+                        "natureza": natureza_cc,
+                        "destino": destino_cc,
+                        "categoria": categoria_cc,
+                        "parcelas": parcelas_txt,
+                        "parcelas_pagas": int(p_pagas_cc),
+                        "parcelas_totais": int(p_total_cc),
+                        "metodo_pagamento": "Crédito",
+                        "is_recorrente": recorrente_cc,
+                        "shared": shared_cc,
+                        "data_registro": str(data_cc),
+                    }).execute()
+                    st.success("✅ Compra registrada!")
+                    invalidar_cache()
+                    st.rerun()
 
     # --- Nova Renda ---
     with st.expander("➕ Nova Renda"):
@@ -303,6 +431,78 @@ with st.sidebar:
                 st.success("✅ Renda salva!")
                 invalidar_cache()
                 st.rerun()
+
+    # --- Cartões & Contas ---
+    with st.expander("🏦 Cartões & Contas"):
+        st.caption("Cadastre seus cartões para acompanhar limite, fechamento e vencimento da fatura.")
+        with st.form("form_novo_banco", clear_on_submit=True):
+            nome_banco_novo = st.text_input("Nome do Cartão/Conta", placeholder="Ex: Nubank, Inter")
+            limite_novo = st.number_input("Limite de Crédito (R$)", min_value=0.0, step=100.0, format="%.2f")
+            c_b1, c_b2 = st.columns(2)
+            with c_b1:
+                fechamento_novo = st.number_input("Dia do Fechamento", min_value=1, max_value=31, value=1, step=1)
+            with c_b2:
+                vencimento_novo = st.number_input("Dia do Vencimento", min_value=1, max_value=31, value=10, step=1)
+            shared_banco_novo = st.checkbox("Cartão compartilhado", value=False,
+                                            help="Visível para a conta conjunta")
+            if st.form_submit_button("➕ Adicionar Cartão", use_container_width=True):
+                if nome_banco_novo.strip():
+                    supabase.table("contas_bancos").insert({
+                        "profile_id": user_id,
+                        "nome_banco": nome_banco_novo.strip(),
+                        "limite_credito": float(limite_novo),
+                        "dia_fechamento": int(fechamento_novo),
+                        "dia_vencimento": int(vencimento_novo),
+                        "shared": shared_banco_novo,
+                    }).execute()
+                    st.success(f"Cartão '{nome_banco_novo}' cadastrado!")
+                    invalidar_cache()
+                    st.rerun()
+                else:
+                    st.warning("Informe um nome para o cartão.")
+
+        if lista_bancos:
+            st.markdown("**Excluir cartão:**")
+            meus_bancos_ids = [b["id"] for b in lista_bancos if b["profile_id"] == user_id]
+            if meus_bancos_ids:
+                nomes_por_id = {b["id"]: b["nome_banco"] for b in lista_bancos}
+                banco_del = st.selectbox(
+                    "Cartão", options=meus_bancos_ids,
+                    format_func=lambda i: nomes_por_id.get(i, str(i)), key="banco_del",
+                )
+                if st.button("🗑️ Remover Cartão", key="btn_del_banco"):
+                    supabase.table("contas_bancos").delete().eq("id", banco_del).execute()
+                    st.success("Cartão removido.")
+                    invalidar_cache()
+                    st.rerun()
+
+    # --- Nova Posição na Carteira ---
+    with st.expander("📈 Nova Posição (Carteira)"):
+        st.caption("Registre um ativo/caixinha real com saldo atual e aporte mensal planejado.")
+        with st.form("form_novo_investimento", clear_on_submit=True):
+            ativo_novo = st.text_input("Nome do Ativo", placeholder="Ex: Tesouro Selic, Reserva de Emergência")
+            categoria_inv_novo = st.selectbox("Categoria", CATEGORIAS_INVESTIMENTO)
+            valor_acum_novo = st.number_input("Valor Acumulado Atual (R$)", min_value=0.0, step=50.0, format="%.2f")
+            aporte_novo = st.number_input("Aporte Mensal Planejado (R$)", min_value=0.0, step=25.0, format="%.2f")
+            taxa_novo = st.number_input("Taxa Anual Estimada (% a.a.)", min_value=0.0, value=10.0, step=0.5)
+            shared_inv_novo = st.checkbox("Posição compartilhada", value=False,
+                                          help="Visível para a conta conjunta")
+            if st.form_submit_button("➕ Adicionar à Carteira", use_container_width=True):
+                if ativo_novo.strip():
+                    supabase.table("investimentos").insert({
+                        "profile_id": user_id,
+                        "ativo": ativo_novo.strip(),
+                        "categoria": categoria_inv_novo,
+                        "valor_acumulado": float(valor_acum_novo),
+                        "aporte_mensal_planejado": float(aporte_novo),
+                        "taxa_anual_estimada": float(taxa_novo),
+                        "shared": shared_inv_novo,
+                    }).execute()
+                    st.success(f"'{ativo_novo}' adicionado à carteira!")
+                    invalidar_cache()
+                    st.rerun()
+                else:
+                    st.warning("Informe um nome para o ativo.")
 
     # --- Novo Perfil do Cartão (sem login) ---
     with st.expander("👥 Novo Perfil do Cartão"):
@@ -389,10 +589,12 @@ st.markdown("---")
 # ──────────────────────────────────────────────
 # TABS PRINCIPAIS
 # ──────────────────────────────────────────────
-tab_gastos, tab_graficos, tab_metas, tab_simulador, tab_perfis = st.tabs([
+tab_gastos, tab_cartoes, tab_graficos, tab_metas, tab_carteira, tab_simulador, tab_perfis = st.tabs([
     "📋 Histórico & Edição",
+    "🏦 Cartões & Faturas",
     "📊 Análise Visual",
     "🎯 Caixinhas",
+    "💰 Carteira",
     "📈 Projeções",
     "👥 Perfis & Conta Conjunta",
 ])
@@ -405,17 +607,19 @@ with tab_gastos:
     if not df_gastos.empty:
         # Resolver nomes dos perfis
         display_cols = ["id", "data_registro", "descricao", "valor", "categoria",
-                        "natureza", "destino", "comprador", "parcelas", "shared"]
+                        "natureza", "destino", "comprador", "metodo_pagamento",
+                        "parcelas", "shared"]
         available_cols = [c for c in display_cols if c in df_gastos.columns]
         st.dataframe(
             df_gastos[available_cols],
             use_container_width=True,
             hide_index=True,
             column_config={
-                "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+                "valor": st.column_config.NumberColumn("Valor Parcela (R$)", format="R$ %.2f"),
                 "shared": st.column_config.CheckboxColumn("Compartilhado"),
                 "data_registro": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
                 "comprador": st.column_config.TextColumn("Quem Comprou"),
+                "metodo_pagamento": st.column_config.TextColumn("Método"),
             },
         )
 
@@ -457,6 +661,124 @@ with tab_gastos:
                     st.rerun()
     else:
         st.info("Nenhuma renda cadastrada.")
+
+# ══════════════════════════════════════════════
+# TAB CARTÕES & FATURAS
+# ══════════════════════════════════════════════
+with tab_cartoes:
+    st.subheader("🏦 Cartões & Faturas")
+
+    if df_bancos.empty:
+        st.markdown("""
+        <div class="empty-state">
+            <div class="empty-icon">🏦</div>
+            <div>Nenhum cartão cadastrado ainda.<br>Use "🏦 Cartões & Contas" no menu lateral para adicionar o primeiro.</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Todos os gastos de crédito (sem filtro de mês) para calcular fatura/limite corretamente
+        df_gastos_todos = carregar_gastos(user_id, None)
+        df_gastos_todos = aplicar_visao(df_gastos_todos)
+
+        hoje_d = date.today()
+
+        for _, banco in df_bancos.iterrows():
+            gastos_banco = (
+                df_gastos_todos[df_gastos_todos["banco_id"] == banco["id"]]
+                if "banco_id" in df_gastos_todos.columns and not df_gastos_todos.empty
+                else pd.DataFrame()
+            )
+            if not gastos_banco.empty:
+                gastos_banco = gastos_banco.copy()
+                for col, default in [("is_recorrente", False), ("parcelas_pagas", 1), ("parcelas_totais", 1)]:
+                    if col not in gastos_banco.columns:
+                        gastos_banco[col] = default
+                    else:
+                        gastos_banco[col] = gastos_banco[col].fillna(default)
+
+            fatura_mes = 0.0
+            limite_preso = 0.0
+            if not gastos_banco.empty:
+                for _, g in gastos_banco.iterrows():
+                    valor_p = float(g.get("valor") or 0)
+                    if g.get("is_recorrente"):
+                        fatura_mes += valor_p
+                        limite_preso += valor_p
+                    else:
+                        pagas = int(g.get("parcelas_pagas") or 1)
+                        totais = int(g.get("parcelas_totais") or 1)
+                        restantes = max(0, totais - pagas)
+                        if restantes > 0:
+                            fatura_mes += valor_p
+                        limite_preso += restantes * valor_p
+
+            limite = float(banco.get("limite_credito") or 0)
+            pct_limite = min(limite_preso / limite, 1.0) if limite > 0 else 0.0
+
+            # Status da fatura (aberta / fechada / atrasada), com base no dia de fechamento/vencimento
+            fechamento = int(banco.get("dia_fechamento") or 1)
+            vencimento = int(banco.get("dia_vencimento") or 10)
+            if hoje_d.day < fechamento:
+                status_fatura, status_cor = "🟢 Aberta", "#06D6A0"
+            elif hoje_d.day < vencimento:
+                status_fatura, status_cor = "🟡 Fechada", "#FFD166"
+            else:
+                status_fatura, status_cor = "🔴 Vencida", "#FF6B6B"
+
+            with st.container():
+                st.markdown(f"""
+                <div class="member-card" style="align-items:flex-start; flex-direction:column; gap:6px;">
+                    <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+                        <span class="member-name" style="font-size:1.1rem;">🏦 {banco['nome_banco']}</span>
+                        <span style="color:{status_cor}; font-weight:700;">{status_fatura}</span>
+                    </div>
+                    <div class="member-sub">Fecha dia {fechamento} • Vence dia {vencimento}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                c_cb1, c_cb2, c_cb3 = st.columns(3)
+                c_cb1.metric("Fatura deste mês", f"R$ {fatura_mes:,.2f}")
+                c_cb2.metric("Comprometido do limite", f"R$ {limite_preso:,.2f}")
+                c_cb3.metric("Limite Total", f"R$ {limite:,.2f}" if limite > 0 else "—")
+
+                if limite > 0:
+                    st.progress(pct_limite)
+                    if pct_limite > 0.9:
+                        st.error(f"🔴 Limite quase esgotado: {pct_limite * 100:.0f}% comprometido!")
+                    elif pct_limite > 0.7:
+                        st.warning(f"🟡 {pct_limite * 100:.0f}% do limite já comprometido.")
+
+                # Divisão da fatura por pessoa (perfis sem login + conta conjunta)
+                if not gastos_banco.empty:
+                    gastos_banco_view = gastos_banco.copy()
+                    gastos_banco_view["comprador"] = gastos_banco_view.apply(nome_comprador, axis=1)
+                    split = gastos_banco_view.groupby("comprador")["valor"].sum().reset_index()
+                    if len(split) > 1:
+                        st.caption("**Divisão da fatura por pessoa:**")
+                        cols_split = st.columns(len(split))
+                        for i, (_, row_s) in enumerate(split.iterrows()):
+                            cols_split[i].metric(row_s["comprador"], f"R$ {row_s['valor']:,.2f}")
+
+                if banco["profile_id"] == user_id:
+                    if st.button(f"✅ Registrar Pagamento da Fatura — {banco['nome_banco']}",
+                                key=f"pagar_{banco['id']}"):
+                        ids_para_pagar = gastos_banco[
+                            (~gastos_banco["is_recorrente"])
+                            & (gastos_banco["parcelas_pagas"] < gastos_banco["parcelas_totais"])
+                        ]["id"].tolist() if not gastos_banco.empty else []
+                        for gid in ids_para_pagar:
+                            linha = gastos_banco[gastos_banco["id"] == gid].iloc[0]
+                            nova_pagas = int(linha["parcelas_pagas"]) + 1
+                            nova_parcela_txt = f"{nova_pagas}/{int(linha['parcelas_totais'])}"
+                            supabase.table("gastos").update({
+                                "parcelas_pagas": nova_pagas,
+                                "parcelas": nova_parcela_txt,
+                            }).eq("id", int(gid)).execute()
+                        st.success("Fatura paga! Parcelas avançadas para o próximo mês.")
+                        invalidar_cache()
+                        st.rerun()
+
+                st.markdown("---")
 
 # ══════════════════════════════════════════════
 # TAB 2: ANÁLISE VISUAL (6+ gráficos)
@@ -652,7 +974,7 @@ with tab_metas:
 
             col_info, col_pct = st.columns([4, 1])
             with col_info:
-                st.markdown(f"**{m['nome']}{tag}** — R\$ {atual:,.2f} de R\$ {alvo:,.2f}")
+                st.markdown(f"**{m['nome']}{tag}** — R$ {atual:,.2f} de R$ {alvo:,.2f}")
             with col_pct:
                 color = "#06D6A0" if prog >= 1.0 else ("#FFD166" if prog >= 0.5 else "#FF6B6B")
                 st.markdown(f'<span style="color:{color}; font-weight:700; font-size:1.1rem;">{prog * 100:.0f}%</span>', unsafe_allow_html=True)
@@ -712,15 +1034,108 @@ with tab_metas:
                 st.rerun()
 
 # ══════════════════════════════════════════════
+# TAB CARTEIRA DE INVESTIMENTOS
+# ══════════════════════════════════════════════
+with tab_carteira:
+    st.subheader("💰 Carteira de Investimentos")
+    st.caption("Posições reais dos seus ativos e caixinhas — diferente da simulação hipotética da aba Projeções.")
+
+    if not df_investimentos.empty:
+        total_carteira = df_investimentos["valor_acumulado"].sum()
+        total_aporte_mensal = df_investimentos["aporte_mensal_planejado"].sum()
+
+        c_cart1, c_cart2, c_cart3 = st.columns(3)
+        c_cart1.metric("💼 Total na Carteira", f"R$ {total_carteira:,.2f}")
+        c_cart2.metric("📆 Aporte Mensal Planejado", f"R$ {total_aporte_mensal:,.2f}")
+        c_cart3.metric("📊 Nº de Posições", f"{len(df_investimentos)}")
+
+        st.markdown("---")
+
+        c_cw1, c_cw2 = st.columns(2)
+        with c_cw1:
+            fig_carteira_pie = px.pie(
+                df_investimentos, names="ativo", values="valor_acumulado",
+                title="Distribuição da Carteira",
+                hole=0.5, color_discrete_sequence=CHART_PALETTE,
+            )
+            fig_carteira_pie.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(family="Inter, sans-serif", color="#FAFAFA"),
+            )
+            fig_carteira_pie.update_traces(textinfo="percent+label")
+            st.plotly_chart(fig_carteira_pie, use_container_width=True)
+
+        with c_cw2:
+            fig_carteira_cat = px.bar(
+                df_investimentos.groupby("categoria")["valor_acumulado"].sum().reset_index().sort_values("valor_acumulado"),
+                x="valor_acumulado", y="categoria", orientation="h",
+                title="Por Categoria", color="categoria",
+                color_discrete_sequence=CHART_PALETTE, text="valor_acumulado",
+            )
+            fig_carteira_cat.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(family="Inter, sans-serif", color="#FAFAFA"), showlegend=False,
+            )
+            fig_carteira_cat.update_traces(texttemplate="R$ %{text:,.2f}", textposition="outside")
+            st.plotly_chart(fig_carteira_cat, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("**Suas posições:**")
+
+        for _, inv in df_investimentos.iterrows():
+            with st.container():
+                col_i1, col_i2, col_i3 = st.columns([3, 1.5, 1.5])
+                with col_i1:
+                    st.markdown(f"**{inv['ativo']}** &nbsp; <span class='badge-info'>{inv['categoria']}</span>",
+                               unsafe_allow_html=True)
+                    st.caption(f"Aporte mensal: R$ {inv['aporte_mensal_planejado']:,.2f} • "
+                              f"Taxa: {inv['taxa_anual_estimada']:.1f}% a.a.")
+                with col_i2:
+                    aporte_extra = st.number_input(
+                        "Aportar (R$)", min_value=0.0, step=20.0, key=f"aporte_inv_{inv['id']}",
+                        label_visibility="collapsed", placeholder="Aportar (R$)",
+                    )
+                with col_i3:
+                    b1, b2 = st.columns(2)
+                    if b1.button("➕", key=f"btn_aporte_inv_{inv['id']}", help="Registrar aporte"):
+                        if aporte_extra > 0:
+                            novo_valor = float(inv["valor_acumulado"]) + float(aporte_extra)
+                            supabase.table("investimentos").update(
+                                {"valor_acumulado": novo_valor}
+                            ).eq("id", inv["id"]).execute()
+                            st.success("Aporte registrado!")
+                            invalidar_cache()
+                            st.rerun()
+                    if inv["profile_id"] == user_id and b2.button("🗑️", key=f"btn_del_inv_{inv['id']}", help="Remover posição"):
+                        supabase.table("investimentos").delete().eq("id", inv["id"]).execute()
+                        st.success(f"'{inv['ativo']}' removido da carteira.")
+                        invalidar_cache()
+                        st.rerun()
+                st.markdown(f"R$ {inv['valor_acumulado']:,.2f}")
+                st.markdown("---")
+    else:
+        st.markdown("""
+        <div class="empty-state">
+            <div class="empty-icon">💰</div>
+            <div>Nenhuma posição cadastrada ainda.<br>Use "📈 Nova Posição (Carteira)" no menu lateral para começar.</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════
 # TAB 4: PROJEÇÕES / SIMULADOR
 # ══════════════════════════════════════════════
 with tab_simulador:
     st.subheader("📈 Simulador de Aportes Mensais")
 
+    aporte_sugerido = float(df_investimentos["aporte_mensal_planejado"].sum()) if not df_investimentos.empty else 0.0
+    if aporte_sugerido == 0.0:
+        aporte_sugerido = max(0.0, float(saldo_livre))
+
     c_s1, c_s2, c_s3 = st.columns(3)
     with c_s1:
         aporte_sim = st.number_input(
-            "Aporte Mensal (R$)", value=max(0.0, float(saldo_livre)), step=25.0, format="%.2f"
+            "Aporte Mensal (R$)", value=aporte_sugerido, step=25.0, format="%.2f",
+            help="Pré-preenchido com a soma dos aportes planejados na sua Carteira (ou o saldo livre, se a carteira estiver vazia).",
         )
     with c_s2:
         taxa_ano = st.number_input("Taxa Anual (% a.a.)", value=10.0, step=0.5)
@@ -794,9 +1209,9 @@ with tab_simulador:
 
         st.markdown("---")
         st.markdown(
-            f"**💰 Total aportado:** R\$ {investido_proj:,.2f} &nbsp;|&nbsp; "
-            f"**📈 Montante final:** R\$ {saldo_proj:,.2f} &nbsp;|&nbsp; "
-            f"**✨ Rendimento:** R\$ {saldo_proj - investido_proj:,.2f}"
+            f"**💰 Total aportado:** R$ {investido_proj:,.2f} &nbsp;|&nbsp; "
+            f"**📈 Montante final:** R$ {saldo_proj:,.2f} &nbsp;|&nbsp; "
+            f"**✨ Rendimento:** R$ {saldo_proj - investido_proj:,.2f}"
         )
     else:
         st.info("Configure um aporte mensal maior que zero para ver a projeção.")
