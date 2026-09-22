@@ -54,17 +54,27 @@ def _do_login(email: str, password: str) -> bool:
         return True
     except Exception as e:
         err = str(e)
-        if "email not confirmed" in err.lower():
+        err_lower = err.lower()
+        if "email not confirmed" in err_lower:
             st.error(
                 "📧 Este e-mail ainda não foi confirmado no Supabase. Se você já "
                 "desativou a confirmação por e-mail, isso não vale retroativamente — "
                 "confirme esta conta manualmente em Authentication → Users no painel "
                 "do Supabase, ou rode o SQL de confirmação em massa."
             )
-        elif "Invalid login" in err or "invalid" in err.lower():
+        elif "invalid login credentials" in err_lower:
             st.error("❌ E-mail ou senha incorretos.")
+        elif "invalid api key" in err_lower or "invalid apikey" in err_lower:
+            st.error(
+                "🔑 A `anon_key` configurada não é válida para este projeto Supabase. "
+                "Confira se a `url` e a `anon_key` em `secrets.toml` são do **mesmo** projeto "
+                "(Project Settings → API)."
+            )
         else:
             st.error(f"Erro ao entrar: {err}")
+
+        with st.expander("🔍 Detalhes técnicos do erro"):
+            st.code(err)
         return False
 
 
