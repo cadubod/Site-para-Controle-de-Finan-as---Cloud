@@ -54,7 +54,14 @@ def _do_login(email: str, password: str) -> bool:
         return True
     except Exception as e:
         err = str(e)
-        if "Invalid login" in err or "invalid" in err.lower():
+        if "email not confirmed" in err.lower():
+            st.error(
+                "📧 Este e-mail ainda não foi confirmado no Supabase. Se você já "
+                "desativou a confirmação por e-mail, isso não vale retroativamente — "
+                "confirme esta conta manualmente em Authentication → Users no painel "
+                "do Supabase, ou rode o SQL de confirmação em massa."
+            )
+        elif "Invalid login" in err or "invalid" in err.lower():
             st.error("❌ E-mail ou senha incorretos.")
         else:
             st.error(f"Erro ao entrar: {err}")
