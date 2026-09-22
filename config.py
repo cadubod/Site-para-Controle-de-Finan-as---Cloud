@@ -21,8 +21,8 @@ def _get_secret(key: str, default: str = "") -> str:
         return default
 
 
-SUPABASE_URL: str = _get_secret("url", "https://SEU_PROJETO.supabase.co")
-SUPABASE_ANON_KEY: str = _get_secret("anon_key", "SUA_ANON_KEY_AQUI")
+SUPABASE_URL: str = _get_secret("url", "https://SEU_PROJETO.supabase.co").strip().rstrip("/")
+SUPABASE_ANON_KEY: str = _get_secret("anon_key", "SUA_ANON_KEY_AQUI").strip()
 
 _PLACEHOLDER_URL = "https://SEU_PROJETO.supabase.co"
 _PLACEHOLDER_KEY = "SUA_ANON_KEY_AQUI"
