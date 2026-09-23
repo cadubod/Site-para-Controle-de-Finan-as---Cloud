@@ -161,9 +161,9 @@ st.markdown("---")
 # ──────────────────────────────────────────────
 # VISÃO: Geral / Pessoal / Conta Conjunta
 # ──────────────────────────────────────────────
-ja_info_visao = get_joint_account_info()
+ja_info = get_joint_account_info()
 visao_atual = "Geral"
-if ja_info_visao:
+if ja_info:
     visao_atual = st.radio(
         "👁️ Visão",
         options=["Geral", "Só o Meu", "Só Conta Conjunta"],
