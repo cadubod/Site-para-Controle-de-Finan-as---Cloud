@@ -49,8 +49,8 @@ def get_current_user() -> dict | None:
                 return st.session_state["user"]
         except Exception:
             # Se o token for inválido ou tiver expirado, limpa o cookie quebrado
-            cookie_manager.delete("sb_token")
-            cookie_manager.delete("sb_refresh")
+            cookie_manager.delete("sb_token", key="del_token_invalid")
+            cookie_manager.delete("sb_refresh", key="del_refresh_invalid")
             
     return None
 
@@ -82,8 +82,8 @@ def _do_login(email: str, password: str) -> bool:
         }
         
         # SALVA NO COOKIE DO NAVEGADOR (Válido por 30 dias)
-        cookie_manager.set("sb_token", session.access_token, max_age=30 * 24 * 60 * 60)
-        cookie_manager.set("sb_refresh", session.refresh_token, max_age=30 * 24 * 60 * 60)
+        cookie_manager.set("sb_token", session.access_token, max_age=30 * 24 * 60 * 60, key="set_token_login")
+        cookie_manager.set("sb_refresh", session.refresh_token, max_age=30 * 24 * 60 * 60, key="set_refresh_login")
         
         _load_profile(user.id)
         return True
@@ -152,8 +152,8 @@ def logout():
         pass
         
     # Destrói os cookies
-    cookie_manager.delete("sb_token")
-    cookie_manager.delete("sb_refresh")
+    cookie_manager.delete("sb_token", key="del_token_logout")
+    cookie_manager.delete("sb_refresh", key="del_refresh_logout") 
     
     for key in ["user", "profile"]:
         st.session_state.pop(key, None)
