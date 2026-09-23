@@ -4,3 +4,4 @@ plotly
 supabase
 gotrue
 python-dotenv
+extra-streamlit-components
